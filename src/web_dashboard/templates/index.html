@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EkoVision Dashboard</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #1a1a1a;
+        color: #ffffff;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+      }
+
+      h1 {
+        font-size: 2.5em;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        font-size: 1.1em;
+        opacity: 0.9;
+      }
+
+      .dashboard {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 20px;
+      }
+
+      .panel {
+        background: #2a2a2a;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+
+      .panel-title {
+        font-size: 1.3em;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #667eea;
+      }
+
+      #video-container {
+        position: relative;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      #video-feed {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .stat-card {
+        background: #333;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .stat-label {
+        font-size: 0.9em;
+        color: #aaa;
+        margin-bottom: 5px;
+      }
+
+      .stat-value {
+        font-size: 1.8em;
+        font-weight: bold;
+        color: #667eea;
+      }
+
+      .stat-unit {
+        font-size: 0.8em;
+        color: #888;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      button {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 1em;
+        cursor: pointer;
+        transition: all 0.3s;
+        font-weight: 600;
+      }
+
+      .btn-primary {
+        background: #667eea;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: #5568d3;
+        transform: translateY(-2px);
+      }
+
+      .btn-secondary {
+        background: #48bb78;
+        color: white;
+      }
+
+      .btn-secondary:hover {
+        background: #38a169;
+        transform: translateY(-2px);
+      }
+
+      .btn-danger {
+        background: #f56565;
+        color: white;
+      }
+
+      .btn-danger:hover {
+        background: #e53e3e;
+        transform: translateY(-2px);
+      }
+
+      .btn-warning {
+        background: #ed8936;
+        color: white;
+      }
+
+      .btn-warning:hover {
+        background: #dd6b20;
+        transform: translateY(-2px);
+      }
+
+      .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+
+      .status-active {
+        background: #48bb78;
+        box-shadow: 0 0 10px #48bb78;
+      }
+
+      .status-inactive {
+        background: #718096;
+      }
+
+      .tracks-list {
+        max-height: 300px;
+        overflow-y: auto;
+      }
+
+      .track-item {
+        background: #333;
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 6px;
+        border-left: 3px solid #667eea;
+      }
+
+      .track-id {
+        font-weight: bold;
+        color: #667eea;
+        margin-bottom: 5px;
+      }
+
+      .track-state {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: 600;
+      }
+
+      .state-NEW {
+        background: #fbbf24;
+        color: #000;
+      }
+      .state-TRACKED {
+        background: #60a5fa;
+        color: #000;
+      }
+      .state-CLASSIFIED {
+        background: #34d399;
+        color: #000;
+      }
+      .state-FAILED {
+        background: #f87171;
+        color: #000;
+      }
+
+      .exports-list {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .export-item {
+        background: #333;
+        padding: 10px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .export-name {
+        font-size: 0.9em;
+        color: #aaa;
+      }
+
+      .export-download {
+        padding: 5px 12px;
+        background: #667eea;
+        color: white;
+        border-radius: 4px;
+        text-decoration: none;
+        font-size: 0.85em;
+      }
+
+      .export-download:hover {
+        background: #5568d3;
+      }
+
+      @media (max-width: 1024px) {
+        .dashboard {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>🎥 EkoVision Dashboard</h1>
+        <p class="subtitle">Real-time Detection-Tracking-Trigger System</p>
+      </header>
+
+      <div class="dashboard">
+        <!-- Left Column: Video & Stats -->
+        <div>
+          <!-- Video Feed -->
+          <div class="panel">
+            <h2 class="panel-title">Live Video Feed</h2>
+            <div id="video-container">
+              <img id="video-feed" src="/video_feed" alt="Video Feed" />
+            </div>
+          </div>
+
+          <!-- Statistics -->
+          <div class="panel" style="margin-top: 20px">
+            <h2 class="panel-title">System Statistics</h2>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">FPS</div>
+                <div class="stat-value" id="stat-fps">0.0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Classifications</div>
+                <div class="stat-value" id="stat-classifications">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Active Tracks</div>
+                <div class="stat-value" id="stat-tracks">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Reduction</div>
+                <div class="stat-value" id="stat-reduction">
+                  0<span class="stat-unit">%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Controls & Info -->
+        <div>
+          <!-- Controls -->
+          <div class="panel">
+            <h2 class="panel-title">Controls</h2>
+            <div class="controls">
+              <button class="btn-primary" onclick="resetPipeline()">
+                🔄 Reset
+              </button>
+              <button class="btn-secondary" onclick="toggleZone()">
+                🎯 Toggle Zone
+              </button>
+              <button class="btn-warning" onclick="exportCSV()">
+                📊 Export CSV
+              </button>
+              <button class="btn-warning" onclick="exportJSON()">
+                📄 Export JSON
+              </button>
+              <button
+                class="btn-danger"
+                id="btn-record"
+                onclick="toggleRecording()"
+              >
+                ⏺️ Start Recording
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Tracks -->
+          <div class="panel" style="margin-top: 20px">
+            <h2 class="panel-title">Active Tracks</h2>
+            <div class="tracks-list" id="tracks-list">
+              <p style="color: #888; text-align: center">No active tracks</p>
+            </div>
+          </div>
+
+          <!-- Exports -->
+          <div class="panel" style="margin-top: 20px">
+            <h2 class="panel-title">Recent Exports</h2>
+            <div class="exports-list" id="exports-list">
+              <p style="color: #888; text-align: center">No exports yet</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Update statistics every second
+      setInterval(updateStats, 1000);
+      setInterval(updateTracks, 1000);
+      setInterval(updateExports, 5000);
+
+      async function updateStats() {
+        try {
+          const response = await fetch("/api/stats");
+          const data = await response.json();
+
+          document.getElementById("stat-fps").textContent =
+            data.avg_fps.toFixed(1);
+          document.getElementById("stat-classifications").textContent =
+            data.classification_count;
+          document.getElementById("stat-tracks").textContent =
+            data.tracker.active_tracks;
+          document.getElementById("stat-reduction").innerHTML =
+            data.reduction_percentage.toFixed(1) +
+            '<span class="stat-unit">%</span>';
+        } catch (error) {
+          console.error("Error updating stats:", error);
+        }
+      }
+
+      async function updateTracks() {
+        try {
+          const response = await fetch("/api/tracks");
+          const data = await response.json();
+
+          const tracksList = document.getElementById("tracks-list");
+
+          if (data.tracks.length === 0) {
+            tracksList.innerHTML =
+              '<p style="color: #888; text-align: center;">No active tracks</p>';
+            return;
+          }
+
+          tracksList.innerHTML = data.tracks
+            .map(
+              (track) => `
+                    <div class="track-item">
+                        <div class="track-id">Track #${track.track_id}</div>
+                        <span class="track-state state-${track.state}">${track.state}</span>
+                        <div style="font-size: 0.85em; color: #aaa; margin-top: 5px;">
+                            Confidence: ${(track.confidence * 100).toFixed(1)}%
+                        </div>
+                    </div>
+                `,
+            )
+            .join("");
+        } catch (error) {
+          console.error("Error updating tracks:", error);
+        }
+      }
+
+      async function updateExports() {
+        try {
+          const response = await fetch("/api/exports");
+          const data = await response.json();
+
+          const exportsList = document.getElementById("exports-list");
+
+          if (data.files.length === 0) {
+            exportsList.innerHTML =
+              '<p style="color: #888; text-align: center;">No exports yet</p>';
+            return;
+          }
+
+          exportsList.innerHTML = data.files
+            .slice(0, 5)
+            .map(
+              (file) => `
+                    <div class="export-item">
+                        <div class="export-name">${file.name}</div>
+                        <a href="/api/download/${file.name}" class="export-download">Download</a>
+                    </div>
+                `,
+            )
+            .join("");
+        } catch (error) {
+          console.error("Error updating exports:", error);
+        }
+      }
+
+      async function resetPipeline() {
+        try {
+          const response = await fetch("/api/control/reset", {
+            method: "POST",
+          });
+          const data = await response.json();
+          alert(data.message);
+        } catch (error) {
+          alert("Error resetting pipeline");
+        }
+      }
+
+      async function toggleZone() {
+        try {
+          const response = await fetch("/api/control/toggle_zone", {
+            method: "POST",
+          });
+          const data = await response.json();
+          alert(`Trigger zone: ${data.show_zone ? "ON" : "OFF"}`);
+        } catch (error) {
+          alert("Error toggling zone");
+        }
+      }
+
+      async function exportCSV() {
+        try {
+          const response = await fetch("/api/control/export_csv", {
+            method: "POST",
+          });
+          const data = await response.json();
+          alert(`CSV exported: ${data.filepath}`);
+          updateExports();
+        } catch (error) {
+          alert("Error exporting CSV");
+        }
+      }
+
+      async function exportJSON() {
+        try {
+          const response = await fetch("/api/control/export_json", {
+            method: "POST",
+          });
+          const data = await response.json();
+          alert(`JSON exported: ${data.filepath}`);
+          updateExports();
+        } catch (error) {
+          alert("Error exporting JSON");
+        }
+      }
+
+      let isRecording = false;
+      async function toggleRecording() {
+        try {
+          const response = await fetch("/api/control/recording", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "toggle" }),
+          });
+          const data = await response.json();
+          isRecording = data.recording;
+
+          const btn = document.getElementById("btn-record");
+          if (isRecording) {
+            btn.textContent = "⏹️ Stop Recording";
+            btn.classList.remove("btn-danger");
+            btn.classList.add("btn-secondary");
+          } else {
+            btn.textContent = "⏺️ Start Recording";
+            btn.classList.remove("btn-secondary");
+            btn.classList.add("btn-danger");
+          }
+        } catch (error) {
+          alert("Error toggling recording");
+        }
+      }
+
+      // Initial load
+      updateStats();
+      updateTracks();
+      updateExports();
+    </script>
+  </body>
+</html>

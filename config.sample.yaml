@@ -1,0 +1,68 @@
+# EkoVision Detection-Tracking-Trigger Configuration
+# This file contains all configurable parameters for the system
+
+# Camera Configuration
+camera:
+  index: 0              # Camera device index (0 = default, 1 = second camera, etc.)
+  width: 640            # Frame width in pixels (320-1920)
+  height: 480           # Frame height in pixels (240-1080)
+
+# Detection Configuration
+detection:
+  confidence_threshold: 0.5  # YOLO confidence threshold (0.0-1.0)
+
+# Trigger Zone Configuration
+trigger_zone:
+  x_offset_pct: 30.0    # X offset from left edge (0-50%)
+  y_offset_pct: 20.0    # Y offset from top edge (0-50%)
+  width_pct: 40.0       # Zone width as percentage of frame (20-80%)
+  height_pct: 60.0      # Zone height as percentage of frame (20-80%)
+
+# Tracking Configuration
+tracking:
+  max_age: 30           # Maximum frames to keep track without detection (10-60)
+  min_hits: 1           # Minimum detections before confirming track (1-5)
+  iou_threshold: 0.3    # IoU threshold for matching detections (0.1-0.9)
+  max_tracks: 20        # Maximum number of simultaneous tracks (5-50)
+  max_classification_attempts: 2  # Maximum retry attempts before FAILED state (1-5)
+
+# Cache Configuration
+cache:
+  max_size: 100         # Maximum number of cached classification results (10-500)
+
+# Model Paths
+models:
+  yolo_path: "best.pt"
+  dinov3_model: "facebook/dinov3-convnext-small-pretrain-lvd1689m"
+  encoder_path: "dinov3_multilabel_encoder.pkl"
+  mapping_path: "label_mapping_dict.joblib"
+  classifiers_dir: "OVR_Checkpoints-20251018T053026Z-1-001/OVR_Checkpoints"
+
+# Label Columns (8 attributes for classification)
+labels:
+  columns:
+    - product
+    - grade
+    - cap
+    - label
+    - brand
+    - type
+    - subtype
+    - volume
+
+# Display Configuration
+display:
+  show_trigger_zone: true   # Show trigger zone overlay on startup
+  show_fps: true            # Show FPS counter
+  show_statistics: true     # Show statistics overlay
+
+# Performance Configuration
+performance:
+  device: "auto"            # Device for inference: "auto", "cuda", or "cpu"
+  warmup_classifiers: true  # Warmup classifiers on startup to prevent lag
+
+# Logging Configuration
+logging:
+  level: "INFO"             # Logging level: DEBUG, INFO, WARNING, ERROR
+  log_to_file: false        # Save logs to file
+  log_file: "ekovision.log" # Log file path (if log_to_file is true)

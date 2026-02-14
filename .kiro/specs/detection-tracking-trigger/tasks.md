@@ -1,0 +1,768 @@
+# Implementation Plan: Detection-Tracking-Trigger Architecture
+
+## Overview
+
+This implementation plan breaks down the Detection-Tracking-Trigger Architecture into incremental coding tasks. The approach follows a bottom-up strategy: build core components first (TriggerZone, BottleTracker, Cache), then integrate them into the pipeline, and finally wire everything into the Streamlit application.
+
+Each task builds on previous tasks and includes property-based tests to validate correctness early. The plan maintains backward compatibility by preserving the existing legacy mode.
+
+## Tasks
+
+- [x] 0. Benchmark classifier performance (CRITICAL - Run before implementation)
+  - [x] 0.1 Create benchmark script for classifier performance
+    - Generate representative DINOv3 feature vectors (random or from sample images)
+    - Measure single classifier inference time
+    - Measure all 314 classifiers sequential inference time
+    - _Requirements: 0.1, 0.2_
+  - [x] 0.2 Test parallel inference with joblib
+    - Implement parallel classification using joblib.Parallel
+    - Measure total parallel inference time with various n_jobs values
+    - Calculate speedup factor (sequential time / parallel time)
+    - _Requirements: 0.3_
+  - [x] 0.3 Document baseline performance metrics
+    - Record single classifier time, total sequential time, total parallel time
+    - Calculate if 100ms target is achievable
+    - Document optimization strategy if needed (parallel inference, model pruning, etc.)
+    - _Requirements: 0.4, 0.5_
+  - [x] 0.4 Checkpoint - Review benchmark results with user
+    - Present performance metrics and optimization recommendations
+    - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 1. Set up project structure and dependencies
+  - Create new directory `src/tracking/` for tracking components
+  - Add `hypothesis` to requirements.txt for property-based testing
+  - Download pure Python ByteTrack implementation (from boxmot or supervision library) and copy to `src/tracking/bytetrack.py`
+  - Note: Avoid pip install bytetrack due to C++ compilation dependencies (cython-bbox, lap) that fail on Windows
+  - Create `tests/unit/` and `tests/property/` directories
+  - Set up pytest configuration with hypothesis settings
+  - _Requirements: 9.1, 9.5_
+
+- [x] 2. Implement TriggerZone class
+  - [x] 2.1 Create `src/tracking/trigger_zone.py` with TriggerZone class
+    - Implement `__init__` with frame dimensions and percentage-based configuration
+    - Implement `get_boundaries()` to calculate pixel coordinates from percentages
+    - Implement `contains_point(x, y)` for point-in-zone checking
+    - Implement `update_config()` for runtime configuration changes
+    - Implement `draw_overlay()` for visualization
+    - _Requirements: 3.1, 3.2, 3.3, 3.5_
+  - [ ]\* 2.2 Write property test for trigger zone configuration
+    - **Property 5: Trigger zone configuration updates boundaries**
+    - **Validates: Requirements 3.2**
+    - Generate random frame dimensions and zone configs
+    - Verify boundaries are correctly calculated from percentages
+    - Test that boundaries stay within frame limits
+  - [ ]\* 2.3 Write property test for point-in-zone detection
+    - **Property 6: Point-in-zone detection**
+    - **Validates: Requirements 4.3**
+    - Generate random zones and points
+    - Verify center points correctly identified as inside/outside
+    - Test edge cases (points on boundaries)
+  - [x]\* 2.4 Write unit tests for TriggerZone
+    - Test default configuration (40% x 60%, centered)
+    - Test invalid configurations (negative, >100%)
+    - Test zone visualization rendering
+    - _Requirements: 3.3, 12.5_
+
+- [x] 3. Implement BottleTracker class with ByteTrack
+  - [x] 3.1 Create `src/tracking/bottle_tracker.py` with data models
+    - Define `TrackingState` enum (NEW, TRACKED, CLASSIFIED, FAILED)
+    - Define `BottleTrack` dataclass with track_id, bbox, confidence, state, frames_since_update, classification_results, classification_attempts
+    - Implement `BottleTrack.get_center()` method
+    - _Requirements: 2.1, 4.1, 4.5, 4.7_
+  - [x] 3.2 Implement BottleTracker class with pure Python ByteTrack
+    - Implement `__init__` with max_age=30, min_hits=1, iou_threshold=0.3, max_classification_attempts=2
+    - Implement `update(detections)` to process new frame detections
+    - Integrate pure Python ByteTrack from src/tracking/bytetrack.py for ID assignment
+    - Implement track state management (NEW → TRACKED → CLASSIFIED → FAILED)
+    - Implement `get_track_by_id()`, `remove_track()`, `get_active_count()`, `reset()`
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6, 4.7_
+  - [ ]\* 3.3 Write property test for unique ID assignment
+    - **Property 2: Unique ID assignment for new detections**
+    - **Validates: Requirements 2.1, 2.6**
+    - Generate random detection sets
+    - Verify all IDs are unique across active tracks
+    - Test with multiple simultaneous detections
+  - [ ]\* 3.4 Write property test for ID persistence
+    - **Property 3: ID persistence across frames**
+    - **Validates: Requirements 2.2**
+    - Generate sequences of overlapping detections
+    - Verify same bottle keeps same ID across frames
+    - Test with slight position changes
+  - [ ]\* 3.5 Write property test for ID lifecycle with occlusion
+    - **Property 4: ID lifecycle with occlusion handling**
+    - **Validates: Requirements 2.3, 2.4**
+    - Simulate detection, occlusion (N frames), reappearance
+    - Verify ID preserved for N ≤ 30, removed for N > 30
+    - Test various occlusion durations
+  - [x]\* 3.6 Write unit tests for BottleTracker
+    - Test first detection assigns ID
+    - Test maximum 20 tracks limit
+    - Test track removal after 31 frames
+    - Test FAILED state prevents further classification attempts
+    - _Requirements: 2.1, 2.4, 11.3, 4.7_
+  - [ ]\* 3.7 Write property test for FAILED state retry prevention
+    - **Property 35: FAILED state prevents infinite retries**
+    - **Validates: Requirements 4.3, 4.7**
+    - Generate random tracks with classification failures
+    - Verify state transitions to FAILED after max attempts
+    - Verify no further classification attempts after FAILED state
+
+- [x] 4. Implement ClassificationCache class
+  - [x] 4.1 Create `src/tracking/classification_cache.py` with ClassificationCache
+    - Implement `__init__` with max_size=100
+    - Use OrderedDict for LRU behavior
+    - Add threading.Lock for thread safety
+    - Implement `get(track_id)` with cache hit/miss tracking
+    - Implement `put(track_id, results)` with LRU eviction
+    - Implement `remove(track_id)`, `clear()`, `get_stats()`
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+  - [ ]\* 4.2 Write property test for cache storage and retrieval
+    - **Property 11: Cache stores classification results**
+    - **Property 12: Cache retrieval for tracked bottles**
+    - **Validates: Requirements 6.1, 6.2**
+    - Generate random track IDs and classification dicts
+    - Verify stored results can be retrieved correctly
+    - Test cache hit/miss counting
+  - [ ]\* 4.3 Write property test for LRU eviction
+    - **Property 14: LRU cache eviction**
+    - **Validates: Requirements 6.5, 11.1**
+    - Insert 101 entries sequentially
+    - Verify oldest entry is evicted
+    - Test LRU ordering with mixed access patterns
+  - [x]\* 4.4 Write unit tests for ClassificationCache
+    - Test cache stores and retrieves results
+    - Test cache miss returns None
+    - Test cache cleanup on remove
+    - Test get_stats() returns correct metrics
+    - _Requirements: 6.1, 6.2, 6.3_
+
+- [x] 5. Checkpoint - Ensure all core component tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 6. Implement DetectionTrackingPipeline class
+  - [x] 6.1 Create `src/tracking/pipeline.py` with DetectionTrackingPipeline
+    - Implement `__init__` to accept all models and create tracker, trigger_zone, cache
+    - Store references to yolo_model, dinov3_processor, dinov3_model, classifiers, mlb, mapping_dict
+    - Initialize frame counter and statistics tracking
+    - Implement classifier warmup: run dummy prediction through all 314 classifiers to prevent first-inference lag
+    - _Requirements: 9.1, 9.5, 5.7_
+  - [x] 6.2 Implement detection layer method
+    - Implement `_detect_bottles(frame_rgb)` to run YOLO inference
+    - Extract bounding boxes and confidence scores
+    - Filter detections by confidence threshold
+    - Return list of (bbox, confidence) tuples
+    - _Requirements: 1.1, 1.3, 1.4_
+  - [ ]\* 6.3 Write property test for detection confidence filtering
+    - **Property 1: Detection respects confidence threshold**
+    - **Validates: Requirements 1.3, 1.4**
+    - Mock YOLO to return detections with known confidence scores
+    - Verify only detections above threshold are returned
+    - Test with various threshold values
+  - [x] 6.4 Implement trigger evaluation logic
+    - Implement `_should_trigger_classification(track)` method
+    - Check if track.state == TrackingState.NEW (not CLASSIFIED or FAILED)
+    - Check if track center is in trigger zone using trigger_zone.contains_point()
+    - Return True only if both conditions met
+    - _Requirements: 4.1, 4.2, 4.3, 8.3_
+  - [ ]\* 6.5 Write property test for classification trigger logic
+    - **Property 7: Classification triggers only for NEW bottles in zone**
+    - **Validates: Requirements 4.1, 4.2, 8.3**
+    - Generate random tracks with various states (NEW, CLASSIFIED, FAILED) and positions
+    - Verify classification triggered only for NEW + in-zone
+    - Test all combinations of state and position
+  - [x] 6.6 Implement classification methods (single and batch)
+    - Implement `_classify_bottle(frame_pil, bbox)` for single bottle classification
+    - Extract crop from frame using bbox coordinates
+    - Call existing `extract_dinov3_features()` function
+    - Run all 314 classifiers on features
+    - Apply existing fallback and conflict resolution logic
+    - Increment classification_attempts counter
+    - If classification fails and attempts >= max_attempts, set state to FAILED
+    - Return classification dict with 8 attributes
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 4.7_
+  - [x] 6.7 Implement batch classification method
+    - Implement `_classify_bottles_batch(frame_pil, bboxes_list)` for multiple bottles
+    - Extract all crops at once
+    - Batch crops into single tensor
+    - Send to DINO in one GPU call to minimize transfer overhead
+    - Run classifiers on all feature vectors
+    - Return list of classification dicts
+    - _Requirements: 5.6_
+  - [ ]\* 6.8 Write property test for classification output format
+    - **Property 9: Classification output format**
+    - **Validates: Requirements 5.2, 5.4**
+    - Mock classification to return controlled results
+    - Verify output dict has exactly 8 keys
+    - Verify all values are strings
+    - Test with various mock inputs
+  - [ ]\* 6.9 Write property test for state transition after classification
+    - **Property 8: State transition after classification**
+    - **Validates: Requirements 4.5**
+    - Create track with state NEW
+    - Trigger classification
+    - Verify state changes to CLASSIFIED
+    - Test that subsequent frames don't re-classify
+  - [ ]\* 6.10 Write property test for batch processing correctness
+    - **Property 34: Batch processing correctness**
+    - **Validates: Requirements 5.6**
+    - Generate random bottle crops
+    - Classify individually and in batch
+    - Verify results are identical for each bottle
+  - [ ]\* 6.11 Write property test for classifier warmup
+    - **Property 33: Classifier warmup prevents first-inference lag**
+    - **Validates: Requirements 5.7**
+    - Measure first classification time after warmup
+    - Measure subsequent classification times
+    - Verify first time is not 10-50x slower than subsequent times
+
+- [ ] 7. Implement main pipeline processing loop
+  - [ ] 7.1 Implement `process_frame(frame_bgr)` method
+    - Convert frame to RGB for YOLO
+    - Call `_detect_bottles()` to get detections
+    - Update tracker with detections
+    - Collect all tracks that need classification in current frame
+    - If multiple bottles need classification, use `_classify_bottles_batch()` for batch processing
+    - If single bottle needs classification, use `_classify_bottle()` (or batch of 1)
+    - For each classified bottle: cache results, update state, increment attempts
+    - For failed classifications: check if max attempts reached, set FAILED state if needed
+    - For FAILED bottles: skip classification trigger check
+    - For other tracks: retrieve cached results
+    - Call `_render_frame()` to annotate frame
+    - Compute and return statistics dict
+    - _Requirements: 1.1, 2.2, 4.1, 4.2, 4.7, 5.6, 6.1, 6.2_
+  - [ ]\* 7.2 Write property test for cache cleanup on track removal
+    - **Property 13: Cache cleanup on track removal**
+    - **Validates: Requirements 6.3**
+    - Create track, classify, cache results
+    - Remove track from tracking
+    - Verify cache entry is also removed
+    - Test with multiple tracks
+  - [ ]\* 7.3 Write property test for maximum tracked bottles limit
+    - **Property 15: Maximum tracked bottles limit**
+    - **Property 16: Confidence-based prioritization at capacity**
+    - **Validates: Requirements 11.3, 11.4**
+    - Generate 25 detections with varying confidence
+    - Verify only 20 tracks are maintained
+    - Verify highest confidence bottles are kept
+  - [ ]\* 7.4 Write unit tests for pipeline processing
+    - Test single bottle detection and classification
+    - Test multiple bottles with different states
+    - Test empty frame (no detections)
+    - _Requirements: 1.1, 2.1, 4.1_
+
+- [ ] 8. Implement frame rendering and visualization
+  - [ ] 8.1 Implement `_render_frame(frame, tracks, show_trigger_zone)` method
+    - Draw trigger zone overlay if enabled
+    - For each track:
+      - Draw bounding box with color based on state (FAILED = red)
+      - Draw track ID above box
+      - If CLASSIFIED: draw all 8 attributes with color-coded text
+      - If NEW/TRACKED: draw state text
+      - If FAILED: draw "FAILED" text in red
+    - Draw FPS counter in top-left corner
+    - Return annotated frame
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 4.7_
+  - [ ] 8.2 Implement configuration update methods
+    - Implement `update_trigger_zone()` to update zone config
+    - Implement `reset()` to clear all state
+    - _Requirements: 3.5, 10.5, 11.5_
+  - [ ]\* 8.3 Write property test for configuration changes
+    - **Property 21: Configuration changes apply immediately**
+    - **Validates: Requirements 10.5**
+    - Process frame with initial config
+    - Update trigger zone config
+    - Process next frame
+    - Verify new config is used
+  - [ ]\* 8.4 Write property test for pipeline statistics
+    - **Property 19: Pipeline statistics completeness**
+    - **Validates: Requirements 13.3**
+    - Process random frames
+    - Verify stats dict contains required keys
+    - Verify values are correct types (int, float)
+
+- [ ] 9. Checkpoint - Ensure pipeline tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 10. Integrate pipeline with Streamlit application
+  - [ ] 10.1 Create TrackingStreamProcessor class in app.py
+    - Copy existing StreamProcessor as template
+    - Replace `predict_frame_from_bgr()` call with `pipeline.process_frame()`
+    - Update predictions_store with classification results and track_id
+    - Maintain FPS limiting logic
+    - _Requirements: 9.1, 9.2, 9.3_
+  - [ ] 10.2 Add mode toggle to Streamlit sidebar
+    - Add radio button: "Processing Mode" with options "Tracking Mode" and "Legacy Mode"
+    - Store mode in session state
+    - When mode changes, call pipeline.reset()
+    - _Requirements: 14.1, 14.3_
+  - [ ] 10.3 Add trigger zone configuration sliders to sidebar
+    - Add sliders for x_offset_pct (0-50%), y_offset_pct (0-50%)
+    - Add sliders for width_pct (20-80%), height_pct (20-80%)
+    - Add slider for tracking persistence (10-60 frames)
+    - Add toggle for trigger zone visualization
+    - When sliders change, call pipeline.update_trigger_zone()
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+  - [ ] 10.4 Update UI to display tracking statistics
+    - Add section in sidebar for real-time statistics
+    - Display: active tracked bottles, classifications per second, cache hit rate
+    - Display current processing mode prominently
+    - Add "Clear Cache" button that calls pipeline.reset()
+    - _Requirements: 11.5, 13.3, 14.4_
+  - [ ] 10.5 Modify predictions display to show track IDs
+    - Update predictions_store entries to include track_id
+    - Display track_id in the prediction cards (e.g., "Bottle #101")
+    - Maintain existing color-coded attribute display
+    - _Requirements: 7.2, 9.3_
+
+- [ ] 11. Implement legacy mode for backward compatibility
+  - [ ] 11.1 Create LegacyStreamProcessor class
+    - Copy original StreamProcessor implementation
+    - Preserve per-frame YOLO + DINOv3 processing
+    - Maintain existing predict_frame_from_bgr() logic
+    - _Requirements: 14.2_
+  - [ ] 11.2 Add mode switching logic in main app
+    - Check session state for selected mode
+    - Instantiate TrackingStreamProcessor or LegacyStreamProcessor based on mode
+    - Display current mode in UI header
+    - _Requirements: 14.1, 14.4_
+  - [ ]\* 11.3 Write property test for legacy mode behavior
+    - **Property 22: Legacy mode processes every frame**
+    - **Validates: Requirements 14.2**
+    - Process sequence of frames in legacy mode
+    - Verify classification called for every frame with detection
+    - Compare with tracking mode (should classify less)
+  - [ ]\* 11.4 Write property test for mode switching
+    - **Property 23: Mode switching clears state**
+    - **Validates: Requirements 14.3**
+    - Process frames in tracking mode
+    - Switch to legacy mode
+    - Verify cache and tracking state are cleared
+    - Switch back and verify state is reset
+
+- [ ] 12. Add error handling and robustness
+  - [ ] 12.1 Add error handling to pipeline.process_frame()
+    - Wrap detection in try-except, log errors, return empty detections on failure
+    - Wrap classification in try-except, return UNKNOWN results on failure
+    - Wrap cache operations in try-except, clear cache on memory errors
+    - Add GPU memory monitoring, fall back to CPU if exhausted
+    - _Requirements: 12.1, 12.2, 12.3, 12.4_
+  - [ ] 12.2 Add configuration validation to TriggerZone
+    - Validate zone dimensions don't exceed frame boundaries
+    - Clamp offsets to valid range [0%, 50%]
+    - Clamp dimensions to valid range [20%, 80%]
+    - Reset to defaults if validation fails, log warning
+    - _Requirements: 12.5_
+  - [ ]\* 12.3 Write property test for error recovery
+    - **Property 17: Error recovery during classification**
+    - **Validates: Requirements 12.2**
+    - Mock classification to raise exception
+    - Verify system continues tracking
+    - Verify results contain "UNKNOWN" values
+  - [ ]\* 12.4 Write property test for invalid configuration handling
+    - **Property 18: Invalid configuration handling**
+    - **Validates: Requirements 12.5**
+    - Provide invalid zone configs (negative, >100%)
+    - Verify system resets to defaults
+    - Verify no crashes occur
+
+- [ ] 13. Add predictions store integration
+  - [ ] 13.1 Update predictions_store format
+    - Modify predictions_store entries to include track_id field
+    - Maintain existing timestamp and pred fields
+    - Ensure thread-safe access with predictions_lock
+    - _Requirements: 9.3_
+  - [ ]\* 13.2 Write property test for predictions store updates
+    - **Property 20: Predictions store update**
+    - **Validates: Requirements 9.3**
+    - Process frames with classifications
+    - Verify predictions_store is updated
+    - Verify entries contain track_id, timestamp, pred
+    - Test thread safety with concurrent access
+
+- [ ] 14. Add performance monitoring and statistics
+  - [ ] 14.1 Implement FPS calculation in pipeline
+    - Track frame timestamps
+    - Calculate rolling average FPS over last 30 frames
+    - Include FPS in statistics dict
+    - _Requirements: 7.6, 13.3_
+  - [ ] 14.2 Implement classification rate tracking
+    - Count classifications per second
+    - Track total classifications vs total frames
+    - Display reduction percentage compared to legacy mode
+    - _Requirements: 8.4, 13.3_
+  - [ ] 14.3 Add debug logging mode
+    - Add debug toggle in sidebar
+    - Log tracking events: new ID, ID lost, classification triggered
+    - Log cache hits/misses
+    - Log performance metrics
+    - _Requirements: 13.2_
+
+- [ ] 15. Final integration and testing
+  - [ ] 15.1 Test with webcam input
+    - Start Streamlit app with webcam
+    - Verify tracking mode works with live video
+    - Test trigger zone configuration changes
+    - Test mode switching between tracking and legacy
+    - _Requirements: 9.4, 14.1, 14.3_
+  - [ ] 15.2 Test with video file input
+    - Add video file upload option to Streamlit
+    - Process pre-recorded video through pipeline
+    - Verify tracking and classification work correctly
+    - Measure FPS and performance metrics
+    - _Requirements: 9.4, 13.1_
+  - [ ]\* 15.3 Write integration tests for complete pipeline
+    - Test single bottle scenario end-to-end
+    - Test multiple bottles scenario
+    - Test occlusion handling
+    - Test cache behavior over long sequences
+    - _Requirements: 1.1, 2.2, 4.1, 6.1_
+  - [ ]\* 15.4 Write property test for classification format consistency
+    - **Property 10: Classification format consistency with legacy system**
+    - **Validates: Requirements 5.3**
+    - Process same crops through tracking and legacy modes
+    - Verify results are identical
+    - Test with various bottle images
+
+- [ ] 16. Final checkpoint - Ensure all tests pass
+  - Run full test suite: `pytest tests/ -v`
+  - Run property tests with statistics: `pytest tests/property/ --hypothesis-show-statistics`
+  - Verify test coverage: `pytest --cov=src --cov-report=html`
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 17. Implement CameraController class
+  - [ ] 17.1 Create `src/camera/camera_controller.py` with CameraController class
+    - Define CameraPreset dataclass with name, exposure, brightness, contrast, auto_exposure
+    - Define PRESETS dict with "Indoor", "Outdoor", "High Speed" configurations
+    - Implement `__init__` to accept VideoCapture instance
+    - Implement `set_exposure()` to set shutter speed (1/250 to 1/2000 sec)
+    - Implement `set_brightness()` to set brightness (-50 to +50)
+    - Implement `set_contrast()` to set contrast (0.5 to 2.0)
+    - Implement `set_auto_exposure()` to toggle auto-exposure
+    - Implement `load_preset()` to apply predefined configurations
+    - Implement `get_current_settings()` to return current camera settings dict
+    - Implement `validate_setting()` to verify camera responds to setting changes
+    - Implement `check_brightness_histogram()` to validate frame brightness
+    - After setting exposure/brightness/contrast, validate by reading back value
+    - Set supports_manual_control flag based on validation results
+    - _Requirements: 15.2, 15.3, 15.4, 15.5, 15.8, 15.9, 15.10, 15.11_
+  - [ ]\* 17.2 Write property test for camera settings application
+    - **Property 24: Camera settings apply in real-time**
+    - **Validates: Requirements 15.6**
+    - Generate random camera settings within valid ranges
+    - Apply settings and verify they're reflected in next frame
+    - Test with various setting combinations
+  - [ ]\* 17.3 Write property test for camera validation
+    - **Property 36: Camera validation detects non-responsive cameras**
+    - **Validates: Requirements 15.10, 15.11**
+    - Mock camera that doesn't respond to settings
+    - Verify validation detects non-responsive behavior
+    - Verify warning is generated for manual configuration
+  - [ ]\* 17.4 Write unit tests for CameraController
+    - Test exposure setting within valid range (1/250 to 1/2000)
+    - Test brightness setting within valid range (-50 to +50)
+    - Test contrast setting within valid range (0.5 to 2.0)
+    - Test auto-exposure toggle
+    - Test preset loading for all three presets
+    - Test invalid settings are clamped to valid ranges
+    - Test validation detects when camera doesn't respond
+    - Test histogram-based brightness validation
+    - _Requirements: 15.2, 15.3, 15.4, 15.5, 15.9, 15.10, 15.11_
+
+- [ ] 18. Implement DataLogger class
+  - [ ] 18.1 Create `src/logging/data_logger.py` with DataLogger class
+    - Implement `__init__` to initialize queues and buffers
+    - Implement `start()` to start background logging thread
+    - Implement `stop()` to stop background thread
+    - Implement `log_detection()` to queue detection events
+    - Implement `log_performance()` to queue performance metrics
+    - Implement background thread worker to process log queue
+    - _Requirements: 16.1, 16.4, 16.8_
+  - [ ] 18.2 Implement video recording functionality
+    - Implement `start_recording()` to initialize VideoWriter
+    - Implement `stop_recording()` to finalize and save MP4 file
+    - Implement `write_frame()` to write frames to video
+    - Use OpenCV VideoWriter with MP4V codec
+    - _Requirements: 16.2_
+  - [ ] 18.3 Implement export functionality
+    - Implement `export_csv()` to write detection data to CSV
+    - Implement `export_json()` to write classification history to JSON
+    - Implement `generate_session_summary()` to create summary report
+    - Implement `_generate_filename()` with timestamp format
+    - _Requirements: 16.1, 16.3, 16.5, 16.7_
+  - [ ]\* 18.4 Write property test for CSV export format
+    - **Property 25: CSV export contains required columns**
+    - **Validates: Requirements 16.1**
+    - Generate random detection logs
+    - Export to CSV and verify all required columns present
+    - Test with various detection counts
+  - [ ]\* 18.5 Write property test for JSON export format
+    - **Property 26: JSON export contains classification history**
+    - **Validates: Requirements 16.3**
+    - Generate random classification history
+    - Export to JSON and verify all bottles included
+    - Test with various bottle counts
+  - [ ]\* 18.6 Write property test for performance logging
+    - **Property 27: Performance metrics logging completeness**
+    - **Validates: Requirements 16.4**
+    - Log random performance metrics
+    - Verify all required fields present in log entries
+    - Test with various metric values
+  - [ ]\* 18.7 Write property test for session summary
+    - **Property 28: Session summary completeness**
+    - **Validates: Requirements 16.5**
+    - Generate random session data
+    - Create summary and verify all required fields present
+    - Test with various session lengths
+  - [ ]\* 18.8 Write property test for filename format
+    - **Property 29: Export filename format**
+    - **Validates: Requirements 16.7**
+    - Generate filenames for various export types
+    - Verify format matches "ekovision_YYYY-MM-DD_HH-MM-SS.ext"
+    - Test timestamp accuracy
+  - [ ]\* 18.9 Write unit tests for DataLogger
+    - Test CSV export with sample detections
+    - Test JSON export with sample classifications
+    - Test video recording start/stop
+    - Test filename generation
+    - Test session summary generation
+    - _Requirements: 16.1, 16.2, 16.3, 16.5, 16.7_
+
+- [ ] 19. Implement PerformanceMonitor class
+  - [ ] 19.1 Create `src/monitoring/performance_monitor.py` with PerformanceMonitor class
+    - Implement `__init__` to initialize metrics tracking
+    - Implement `update_fps()` to add FPS to history deque
+    - Implement `get_cpu_usage()` using psutil
+    - Implement `get_gpu_usage()` using torch/nvidia-smi
+    - Implement `get_vram_usage()` using torch.cuda API (torch.cuda.memory_allocated and get_device_properties)
+    - Use torch.cuda for <1ms overhead instead of nvidia-smi subprocess (50-100ms)
+    - Add fallback to return (0.0, 0.0) if CUDA not available
+    - Implement `update_frame_times()` to track processing breakdown
+    - Implement `get_frame_times()` to return time breakdown dict
+    - Implement `calculate_reduction_percentage()` for computational savings
+    - Implement `get_warnings()` to check thresholds and return warnings
+    - Implement `get_fps_graph_data()` to return FPS history for plotting
+    - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6, 17.7, 17.8, 17.9, 17.10_
+  - [ ]\* 19.2 Write property test for VRAM monitoring performance
+    - **Property 37: VRAM monitoring uses torch.cuda API**
+    - **Validates: Requirements 17.3**
+    - Measure time for get_vram_usage() call
+    - Verify it completes in <1ms (not 50-100ms)
+    - Test with CUDA available and unavailable
+  - [ ]\* 19.3 Write unit tests for PerformanceMonitor
+    - Test CPU usage retrieval
+    - Test GPU usage retrieval (if GPU available)
+    - Test VRAM usage retrieval (if GPU available)
+    - Test VRAM usage returns (0.0, 0.0) if CUDA unavailable
+    - Test FPS history tracking (60 second window)
+    - Test frame time breakdown tracking
+    - Test warning generation for low FPS (<10)
+    - Test warning generation for high GPU usage (>95%)
+    - Test warning generation for high VRAM usage (>90%)
+    - Test torch.cuda API is used (not nvidia-smi)
+    - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.7, 17.8, 17.9_
+
+- [ ] 20. Implement TestingModeManager class
+  - [ ] 20.1 Create `src/testing/testing_mode_manager.py` with TestingModeManager class
+    - Define TestingMode enum with NORMAL, STATIC_TEST, LOW_SPEED_TEST, STRESS_TEST
+    - Implement `__init__` to initialize mode and metrics dicts
+    - Implement `set_mode()` to change mode and reset metrics
+    - Implement `get_mode()` to return current mode
+    - Implement `update_static_test()` to track position stability
+    - Implement `update_low_speed_test()` to detect ID swaps
+    - Implement `update_stress_test()` to track max concurrent bottles
+    - Implement `get_metrics()` to return mode-specific metrics
+    - Implement `get_warnings()` to return mode-specific warnings
+    - _Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 18.6, 18.7_
+  - [ ]\* 20.2 Write property test for static test movement detection
+    - **Property 30: Static test movement detection**
+    - **Validates: Requirements 18.3**
+    - Generate random bottle positions with movement
+    - Verify warnings generated when movement exceeds threshold
+    - Test with various movement amounts
+  - [ ]\* 20.3 Write property test for low-speed test ID swap detection
+    - **Property 31: Low-speed test ID swap detection**
+    - **Validates: Requirements 18.5**
+    - Generate random tracking sequences with ID swaps
+    - Verify warnings generated when ID swaps occur
+    - Test with various swap scenarios
+  - [ ]\* 20.4 Write property test for stress test capacity warning
+    - **Property 32: Stress test capacity warning**
+    - **Validates: Requirements 18.7**
+    - Generate random frame sequences with varying bottle counts
+    - Verify warnings generated when count exceeds 20
+    - Test with various bottle counts
+  - [ ]\* 20.5 Write unit tests for TestingModeManager
+    - Test mode switching between all modes
+    - Test static test metrics calculation
+    - Test low-speed test metrics calculation
+    - Test stress test metrics calculation
+    - Test warning generation for each mode
+    - _Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 18.6, 18.7_
+
+- [ ] 21. Integrate new components with Streamlit UI
+  - [ ] 21.1 Add camera configuration section to sidebar
+    - Add "Camera Configuration" expander in sidebar
+    - Add slider for exposure (1/250 to 1/2000 sec)
+    - Add slider for brightness (-50 to +50)
+    - Add slider for contrast (0.5 to 2.0)
+    - Add toggle for auto-exposure
+    - Add preset buttons: "Indoor", "Outdoor", "High Speed"
+    - Display current camera settings
+    - Display camera control status indicator:
+      - Green: Programmatic control working (validation passed)
+      - Yellow: Manual configuration recommended (validation warnings)
+      - Red: Camera not responding to settings (validation failed)
+    - Wire sliders to CameraController methods
+    - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.7, 15.8, 15.10, 15.11_
+  - [ ] 21.2 Add data logging controls to sidebar
+    - Add "Data Logging" expander in sidebar
+    - Add "Start/Stop Recording" toggle button
+    - Add "Export CSV" button
+    - Add "Export JSON" button
+    - Wire buttons to DataLogger methods
+    - Display recording status indicator
+    - Show export success/failure messages
+    - _Requirements: 16.6_
+  - [ ] 21.3 Add performance monitoring display to sidebar
+    - Add "Performance Metrics" expander in sidebar
+    - Display CPU usage percentage
+    - Display GPU usage percentage (if available)
+    - Display VRAM usage (current/total)
+    - Display frame processing time breakdown
+    - Display classification reduction percentage
+    - Display cache statistics (size, hit rate, miss rate)
+    - Display warning indicators for performance issues
+    - Add FPS graph using st.line_chart() for last 60 seconds
+    - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6, 17.7, 17.8, 17.9, 17.10_
+  - [ ] 21.4 Add testing mode selector to sidebar
+    - Add "Testing Mode" selector with radio buttons
+    - Options: "Normal", "Static Test", "Low-Speed Test", "Stress Test"
+    - Display current testing mode in UI header
+    - Display mode-specific metrics in sidebar
+    - Display mode-specific warnings
+    - Wire selector to TestingModeManager
+    - _Requirements: 18.1, 18.8, 18.9_
+
+- [ ] 22. Wire new components into DetectionTrackingPipeline
+  - [ ] 22.1 Update pipeline to use DataLogger
+    - Add DataLogger instance to pipeline
+    - Call log_detection() for each detection
+    - Call log_performance() after each frame
+    - Call write_frame() if recording is active
+    - _Requirements: 16.1, 16.2, 16.4_
+  - [ ] 22.2 Update pipeline to use PerformanceMonitor
+    - Add PerformanceMonitor instance to pipeline
+    - Track frame processing time breakdown
+    - Update FPS history after each frame
+    - Return performance metrics in statistics dict
+    - _Requirements: 17.4, 17.5_
+  - [ ] 22.3 Update pipeline to use TestingModeManager
+    - Add TestingModeManager instance to pipeline
+    - Update mode-specific metrics after each frame
+    - Include mode warnings in statistics dict
+    - _Requirements: 18.2, 18.4, 18.6_
+
+- [ ] 23. Checkpoint - Test new features integration
+  - Test camera configuration changes apply correctly
+  - Test CSV export with sample data
+  - Test JSON export with sample data
+  - Test video recording start/stop
+  - Test performance metrics display
+  - Test testing mode switching
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 24. Final integration testing with all features
+  - [ ] 24.1 Test complete system with webcam
+    - Test tracking mode with camera configuration
+    - Test data logging and export
+    - Test performance monitoring display
+    - Test all testing modes
+    - _Requirements: 15.6, 16.1, 16.2, 16.3, 17.1-17.10, 18.1-18.9_
+  - [ ] 24.2 Test complete system with video file
+    - Process pre-recorded video with all features enabled
+    - Verify CSV export contains all detections
+    - Verify JSON export contains all classifications
+    - Verify video recording produces valid MP4
+    - Verify session summary is generated correctly
+    - _Requirements: 16.1, 16.2, 16.3, 16.5_
+  - [ ]\* 24.3 Write integration tests for new features
+    - Test camera controller integration with pipeline
+    - Test data logger integration with pipeline
+    - Test performance monitor integration with UI
+    - Test testing mode manager integration with pipeline
+    - _Requirements: 15.6, 16.8, 17.4, 18.2_
+
+- [ ] 25. Final checkpoint - Complete system validation
+  - Run full test suite including new property tests
+  - Verify all 32 correctness properties pass
+  - Test system with real-world scenarios
+  - Validate proof-of-concept requirements met
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Tasks marked with `*` are optional property-based and unit tests that can be skipped for faster MVP
+- Each task references specific requirements for traceability
+- Checkpoints ensure incremental validation at key milestones
+- Property tests validate universal correctness properties with 100+ randomized examples
+- Unit tests validate specific examples and edge cases
+- The implementation maintains backward compatibility through legacy mode
+- All components are designed to be thread-safe for Streamlit's async processing
+- New features (camera control, data logging, performance monitoring, testing modes) are integrated incrementally
+
+## Critical Implementation Notes
+
+### ByteTrack Dependency (CRITICAL)
+
+- DO NOT use `pip install bytetrack` - it requires C++ compilation (cython-bbox, lap) that fails on Windows
+- Use pure Python ByteTrack implementation from boxmot or supervision library
+- Copy implementation to `src/tracking/bytetrack.py` for portability
+
+### Classifier Performance (CRITICAL)
+
+- Task 0 MUST run before implementation to benchmark 314 classifiers
+- Target: <100ms total classification time (not 200ms)
+- If sequential inference exceeds 100ms, implement parallel inference with joblib
+- Classifier warmup during initialization prevents 10-50x first-inference lag spike
+
+### Batch Processing (HIGH PRIORITY)
+
+- When multiple bottles enter trigger zone simultaneously, batch process them
+- Single GPU call for all bottles minimizes transfer overhead
+- Batch processing path: collect all triggered bottles → batch extract crops → single DINO call → batch classify
+
+### FAILED State (HIGH PRIORITY)
+
+- Prevents infinite retry loops when classification fails
+- Max 2 classification attempts per bottle (configurable)
+- FAILED bottles skip classification trigger check
+- Display FAILED state with red color in UI
+
+### Camera Control Validation (MEDIUM PRIORITY)
+
+- Many cameras don't respond to cv2.CAP_PROP_EXPOSURE or return random values
+- Validate settings by reading back values after setting
+- Display status indicator: Green (working), Yellow (manual recommended), Red (not responding)
+- Provide histogram-based brightness validation as fallback
+- Document manual configuration procedure for non-responsive cameras
+
+### VRAM Monitoring (LOW PRIORITY)
+
+- Use torch.cuda.memory_allocated() and get_device_properties() for <1ms overhead
+- DO NOT use nvidia-smi subprocess (50-100ms overhead)
+- Fallback to (0.0, 0.0) if CUDA not available
+
+### Performance Targets
+
+- Classification: <100ms for 314 classifiers (with warmup and optional parallelization)
+- VRAM monitoring: <1ms per query
+- Data logging: <5ms overhead (background thread)
+- FPS target: 15+ FPS single bottle, 10+ FPS with 5 bottles
+
+### Testing Strategy
+
+- Task 0 benchmarking establishes performance baselines before implementation
+- Property tests verify correctness across randomized inputs (100+ examples)
+- Unit tests verify specific examples, edge cases, and error conditions
+- Integration tests validate complete system with real models
+- All 37 correctness properties must pass (including 5 new properties for critical fixes)
