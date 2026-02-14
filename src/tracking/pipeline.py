@@ -426,14 +426,25 @@ class DetectionTrackingPipeline:
             thickness = 3 if track.state == TrackingState.CLASSIFIED else 2
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
             
-            # Draw track ID
+            # Draw track ID with background (BIGGER)
             track_text = f"ID: {track.track_id}"
+            text_size = cv2.getTextSize(track_text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)[0]
+            
+            # Black background for track ID
+            cv2.rectangle(
+                annotated,
+                (x1 - 2, y1 - text_size[1] - 12),
+                (x1 + text_size[0] + 2, y1 - 2),
+                (0, 0, 0),
+                -1
+            )
+            
             cv2.putText(
                 annotated,
                 track_text,
                 (x1, y1 - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                0.9,  # Dari 0.6 → 0.9 (50% lebih besar)
                 color,
                 2
             )
@@ -445,21 +456,34 @@ class DetectionTrackingPipeline:
                 if results is None:
                     results = track.classification_results
                 
-                # Draw all 8 attributes
+                # Draw all 8 attributes with LARGER text
                 y_offset = y1 - 30
-                if y_offset < 200:
-                    y_offset = y2 + 20
+                if y_offset < 250:
+                    y_offset = y2 + 30
                 
                 for i, (key, value) in enumerate(results.items()):
                     text = f"{key}: {value}"
                     text_color = category_colors.get(key, (255, 255, 255))
                     
+                    # Draw text with black background for better visibility
+                    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                    
+                    # Draw black background rectangle
+                    cv2.rectangle(
+                        annotated,
+                        (x1 - 2, y_offset + i * 30 - text_size[1] - 2),
+                        (x1 + text_size[0] + 2, y_offset + i * 30 + 2),
+                        (0, 0, 0),
+                        -1
+                    )
+                    
+                    # Draw text (BIGGER: 0.5 → 0.8, thickness: 2 → 2)
                     cv2.putText(
                         annotated,
                         text,
-                        (x1, y_offset + i * 20),
+                        (x1, y_offset + i * 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
+                        0.8,  # Dari 0.5 → 0.8 (60% lebih besar)
                         text_color,
                         2
                     )
@@ -489,28 +513,50 @@ class DetectionTrackingPipeline:
                     2
                 )
         
-        # Draw FPS counter
+        # Draw FPS counter (BIGGER with background)
         if self.fps_history:
             avg_fps = sum(self.fps_history) / len(self.fps_history)
             fps_text = f"FPS: {avg_fps:.1f}"
+            text_size = cv2.getTextSize(fps_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+            
+            # Black background
+            cv2.rectangle(
+                annotated,
+                (5, 5),
+                (15 + text_size[0], 40),
+                (0, 0, 0),
+                -1
+            )
+            
             cv2.putText(
                 annotated,
                 fps_text,
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
+                1.2,  # Dari 1.0 → 1.2 (20% lebih besar)
                 (0, 255, 0),
-                2
+                3  # Dari 2 → 3 (lebih tebal)
             )
         
-        # Draw statistics
+        # Draw statistics (BIGGER with background)
         stats_text = f"Tracks: {len(tracks)} | Classifications: {self.classification_count}"
+        text_size = cv2.getTextSize(stats_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+        
+        # Black background
+        cv2.rectangle(
+            annotated,
+            (5, 50),
+            (15 + text_size[0], 80),
+            (0, 0, 0),
+            -1
+        )
+        
         cv2.putText(
             annotated,
             stats_text,
-            (10, 60),
+            (10, 70),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            0.8,  # Dari 0.6 → 0.8 (33% lebih besar)
             (255, 255, 255),
             2
         )
