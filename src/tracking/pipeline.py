@@ -129,6 +129,14 @@ class DetectionTrackingPipeline:
         self.last_frame_time = time.time()
         self.show_trigger_zone = True  # Default: show trigger zone
         
+        # Skip frame detection for performance optimization
+        self.skip_frames = classification_config.get('skip_frames', 0)  # 0 = detect every frame
+        self.detection_frame_counter = 0
+        self.last_detections = []  # Store last detection results
+        
+        # Overlay display toggle
+        self.show_overlay = classification_config.get('show_overlay', True)
+        
         # Warmup classifiers
         self._warmup_classifiers()
     
@@ -326,8 +334,18 @@ class DetectionTrackingPipeline:
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         frame_pil = Image.fromarray(frame_rgb)
         
-        # 1. Detection
-        detections = self._detect_bottles(frame_rgb)
+        # 1. Detection (with skip frame optimization)
+        should_detect = (self.detection_frame_counter % (self.skip_frames + 1)) == 0
+        
+        if should_detect:
+            # Run detection on this frame
+            detections = self._detect_bottles(frame_rgb)
+            self.last_detections = detections  # Store for skipped frames
+        else:
+            # Reuse last detection results (tracking will handle movement)
+            detections = self.last_detections
+        
+        self.detection_frame_counter += 1
         
         # 2. Tracking
         tracks = self.tracker.update(detections)
@@ -570,12 +588,13 @@ class DetectionTrackingPipeline:
             2
         )
         
-        # Draw classification overlay (last step)
-        annotated = self.overlay.render(
-            annotated,
-            tracks,
-            self.cache
-        )
+        # Draw classification overlay (last step) - only if enabled
+        if self.show_overlay:
+            annotated = self.overlay.render(
+                annotated,
+                tracks,
+                self.cache
+            )
         
         return annotated
     

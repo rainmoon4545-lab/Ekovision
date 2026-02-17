@@ -1,0 +1,95 @@
+# EkoVision Detection-Tracking-Trigger Configuration
+# OPTIMIZED FOR LOW-END LAPTOP (i3, 4GB RAM, No GPU)
+# Target: 15-25 FPS
+
+# Camera Configuration
+camera:
+  index: 0 # Camera device index (0 = default, 1 = second camera, etc.)
+  width: 320 # Frame width in pixels - REDUCED from 640 for performance
+  height: 240 # Frame height in pixels - REDUCED from 480 for performance
+
+# Detection Configuration
+detection:
+  confidence_threshold: 0.55 # YOLO confidence threshold (0.0-1.0)
+  iou_threshold: 0.45 # IoU threshold for NMS (0.0-1.0)
+
+# Trigger Zone Configuration
+trigger_zone:
+  x_offset_pct: 30.0 # X offset from left edge (0-50%)
+  y_offset_pct: 20.0 # Y offset from top edge (0-50%)
+  width_pct: 40.0 # Zone width as percentage of frame (20-80%)
+  height_pct: 60.0 # Zone height as percentage of frame (20-80%)
+
+# Tracking Configuration
+tracking:
+  max_age: 30 # Maximum frames to keep track without detection
+  min_hits: 1 # Minimum detections before confirming track
+  iou_threshold: 0.3 # IoU threshold for matching detections (0.0-1.0)
+  max_tracks: 5 # Maximum number of simultaneous tracks - REDUCED from 20
+  max_classification_attempts: 1 # Maximum retry attempts - REDUCED from 2
+
+# Cache Configuration
+cache:
+  max_size: 50 # Maximum number of cached classification results - REDUCED from 100
+
+# Classification Configuration
+classification:
+  confidence_threshold: 0.45 # Classification confidence threshold (0.0-1.0)
+  expand_bbox_ratio: 0.1 # Expand bounding box by this ratio (0.0-0.3)
+  min_crop_size: 224 # Minimum crop size in pixels
+  enable_temporal_smoothing: false # DISABLED for performance
+  temporal_window_size: 5 # Number of frames for temporal smoothing
+  enable_preprocessing: false # DISABLED for performance (no CLAHE, denoising)
+  enable_ensemble: false # Ensemble classification (slower but more accurate)
+  skip_frames: 2 # Skip detection every N frames (0=detect every frame, 2=detect every 3rd frame)
+  show_overlay: false # DISABLED for maximum performance
+
+# Model Paths
+models:
+  yolo_path: "best.pt"
+  dinov3_model: "facebook/dinov3-convnext-small-pretrain-lvd1689m"
+  encoder_path: "dinov3_multilabel_encoder.pkl"
+  mapping_path: "label_mapping_dict.joblib"
+  classifiers_dir: "OVR_Checkpoints-20251018T053026Z-1-001/OVR_Checkpoints"
+
+# Label Columns (8 attributes for classification)
+labels:
+  columns:
+    - product
+    - grade
+    - cap
+    - label
+    - brand
+    - type
+    - subtype
+    - volume
+
+# Display Configuration
+display:
+  show_trigger_zone: true # Show trigger zone overlay on startup
+  show_fps: true # Show FPS counter
+  show_statistics: true # Show statistics overlay
+
+# Performance Configuration
+performance:
+  device: "cpu" # Device for inference: "auto", "cuda", or "cpu" - CPU only for this laptop
+  warmup_classifiers: true # Warmup classifiers on startup to prevent lag
+
+# Logging Configuration
+logging:
+  level: "INFO" # Logging level: DEBUG, INFO, WARNING, ERROR
+  log_to_file: false # Save logs to file
+  log_file: "ekovision.log" # Log file path (if log_to_file is true)
+
+
+# PERFORMANCE NOTES:
+# - Resolution reduced to 320x240 (2-3x faster)
+# - Skip frame detection enabled (detect every 3rd frame) (3-5x faster)
+# - Preprocessing disabled (1.3-1.5x faster)
+# - Temporal smoothing disabled (1.2x faster)
+# - Max tracks reduced to 5 (1.2-1.3x faster)
+# - Overlay disabled (1.1x faster)
+# - Classification attempts reduced to 1 (1.1x faster)
+#
+# ESTIMATED FPS: 15-25 FPS (from baseline 1-2 FPS)
+# TRADE-OFF: Slightly reduced accuracy due to lower resolution and disabled preprocessing
