@@ -12,6 +12,7 @@ from collections import deque
 from .bottle_tracker import BottleTracker, TrackingState
 from .trigger_zone import TriggerZone, TriggerZoneConfig
 from .classification_cache import ClassificationCache
+from .classification_overlay import ClassificationOverlay
 from ..image_enhancement import (
     expand_bbox,
     preprocess_crop,
@@ -106,6 +107,14 @@ class DetectionTrackingPipeline:
         )
         
         self.cache = ClassificationCache(max_size=100)
+        
+        # Initialize classification overlay
+        self.overlay = ClassificationOverlay(
+            position="top-center",
+            background_alpha=0.7,
+            font_scale=0.6,
+            max_tracks_display=3
+        )
         
         # Temporal smoother
         if self.enable_temporal_smoothing:
@@ -559,6 +568,13 @@ class DetectionTrackingPipeline:
             0.8,  # Dari 0.6 → 0.8 (33% lebih besar)
             (255, 255, 255),
             2
+        )
+        
+        # Draw classification overlay (last step)
+        annotated = self.overlay.render(
+            annotated,
+            tracks,
+            self.cache
         )
         
         return annotated
